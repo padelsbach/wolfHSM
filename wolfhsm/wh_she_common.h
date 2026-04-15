@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 wolfSSL Inc.
+ * Copyright (C) 2026 wolfSSL Inc.
  *
  * This file is part of wolfHSM.
  *
@@ -55,9 +55,12 @@
 #define WH_SHE_M1_KID_SHIFT 4
 #define WH_SHE_M1_AID_SHIFT 0
 
-/* M2 is 28 bits of BE counter, 4 bits of flags, 96 bits of 0's, 16 bytes Key */
+/* M2 is 28 bits of BE counter, 5 bits of flags, 95 bits of 0's, 16 bytes
+ * Key. The flags field straddles a byte boundary: its high 4 bits occupy
+ * the low nibble of M2[3], and the low bit occupies the high bit of M2[4].
+ * See _PopFlags in wh_server_she.c for the unpack, and the M2 build in
+ * wh_She_GenerateLoadableKey for the pack. */
 #define WH_SHE_M2_COUNT_SHIFT 4
-#define WH_SHE_M2_FLAGS_SHIFT 0
 #define WH_SHE_M2_KEY_OFFSET 16
 
 /* M4 is 15 bytes of UID, 4 bits of KID, 4 bits of AID, like M1.

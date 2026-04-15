@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 wolfSSL Inc.
+ * Copyright (C) 2026 wolfSSL Inc.
  *
  * This file is part of wolfHSM.
  *
@@ -315,6 +315,7 @@ int whTest_SheClientConfig(whClientConfig* config)
         uint8_t badUid[WH_SHE_UID_SZ];
         uint8_t zeroUid[WH_SHE_UID_SZ] = {0};
         const uint32_t SHE_WILDCARD_KEY_ID = 5;
+        const uint32_t SHE_WRITE_PROTECT_KEY_ID = 6;
 
         memset(badUid, 0xAA, sizeof(badUid));
 
@@ -356,22 +357,31 @@ int whTest_SheClientConfig(whClientConfig* config)
             goto exit;
         }
 
-        /* Preload the target slot with WH_SHE_FLAG_WILDCARD and count
-         * 0 via ShePreProgramKey, which writes the meta label directly
-         * (wh_She_GenerateLoadableKey cannot encode flags > 4 bits due
-         * to the M2 layout overlap between flags and count). Then
-         * re-load the slot with an all-zero UID; the server must
-         * accept it because the stored flags contain WILDCARD. */
-        if ((ret = wh_Client_ShePreProgramKey(client,
-                SHE_WILDCARD_KEY_ID, WH_SHE_FLAG_WILDCARD, vectorRawKey,
-                sizeof(vectorRawKey))) != 0) {
+        /* Preload the target slot via SheLoadKey with the correct UID
+         * and WH_SHE_FLAG_WILDCARD set, then re-load the slot with an
+         * all-zero UID and a higher counter. The server must accept
+         * the second load because the stored flags contain WILDCARD.
+         * This exercises both the client-side M2 flag packing and the
+         * server-side wildcard acceptance. */
+        if ((ret = wh_She_GenerateLoadableKey(SHE_WILDCARD_KEY_ID,
+                WH_SHE_MASTER_ECU_KEY_ID, 1, WH_SHE_FLAG_WILDCARD,
+                sheUid, vectorRawKey, vectorMasterEcuKey, messageOne,
+                messageTwo, messageThree, messageFour,
+                messageFive)) != 0) {
+            WH_ERROR_PRINT("Failed to generate wildcard preload "
+                           "M1/M2/M3 %d\n", ret);
+            goto exit;
+        }
+        if ((ret = wh_Client_SheLoadKey(client, messageOne, messageTwo,
+                messageThree, outMessageFour, outMessageFive)) != 0) {
             WH_ERROR_PRINT("Failed to preload wildcard key %d\n", ret);
             goto exit;
         }
         if ((ret = wh_She_GenerateLoadableKey(SHE_WILDCARD_KEY_ID,
-                WH_SHE_MASTER_ECU_KEY_ID, 1, 0, zeroUid, vectorRawKey,
-                vectorMasterEcuKey, messageOne, messageTwo,
-                messageThree, messageFour, messageFive)) != 0) {
+                WH_SHE_MASTER_ECU_KEY_ID, 2, WH_SHE_FLAG_WILDCARD,
+                zeroUid, vectorRawKey, vectorMasterEcuKey, messageOne,
+                messageTwo, messageThree, messageFour,
+                messageFive)) != 0) {
             WH_ERROR_PRINT("Failed to generate zero-UID wildcard "
                            "M1/M2/M3 %d\n", ret);
             goto exit;
@@ -386,6 +396,51 @@ int whTest_SheClientConfig(whClientConfig* config)
         if ((ret = _destroySheKey(client, SHE_WILDCARD_KEY_ID)) != 0) {
             WH_ERROR_PRINT("Failed to _destroySheKey wildcard slot, "
                            "ret=%d\n", ret);
+            goto exit;
+        }
+
+        /* Load a key with WH_SHE_FLAG_WRITE_PROTECT set, then attempt
+         * to re-load the same slot. The server must reject the update
+         * with WH_SHE_ERC_WRITE_PROTECTED. This round-trips the flag
+         * through the wire and the NVM label. */
+        if ((ret = wh_She_GenerateLoadableKey(SHE_WRITE_PROTECT_KEY_ID,
+                WH_SHE_MASTER_ECU_KEY_ID, 1, WH_SHE_FLAG_WRITE_PROTECT,
+                sheUid, vectorRawKey, vectorMasterEcuKey, messageOne,
+                messageTwo, messageThree, messageFour,
+                messageFive)) != 0) {
+            WH_ERROR_PRINT("Failed to generate write-protect preload "
+                           "M1/M2/M3 %d\n", ret);
+            goto exit;
+        }
+        if ((ret = wh_Client_SheLoadKey(client, messageOne, messageTwo,
+                messageThree, outMessageFour, outMessageFive)) != 0) {
+            WH_ERROR_PRINT("Failed to preload write-protect key %d\n",
+                           ret);
+            goto exit;
+        }
+        if ((ret = wh_She_GenerateLoadableKey(SHE_WRITE_PROTECT_KEY_ID,
+                WH_SHE_MASTER_ECU_KEY_ID, 2, WH_SHE_FLAG_WRITE_PROTECT,
+                sheUid, vectorRawKey, vectorMasterEcuKey, messageOne,
+                messageTwo, messageThree, messageFour,
+                messageFive)) != 0) {
+            WH_ERROR_PRINT("Failed to generate write-protect re-load "
+                           "M1/M2/M3 %d\n", ret);
+            goto exit;
+        }
+        ret = wh_Client_SheLoadKey(client, messageOne, messageTwo,
+                messageThree, outMessageFour, outMessageFive);
+        if (ret != WH_SHE_ERC_WRITE_PROTECTED) {
+            WH_ERROR_PRINT("SHE LOAD KEY re-load of write-protected "
+                           "slot: expected WRITE_PROTECTED, got %d\n",
+                           ret);
+            ret = WH_ERROR_ABORTED;
+            goto exit;
+        }
+
+        if ((ret = _destroySheKey(client,
+                SHE_WRITE_PROTECT_KEY_ID)) != 0) {
+            WH_ERROR_PRINT("Failed to _destroySheKey write-protect "
+                           "slot, ret=%d\n", ret);
             goto exit;
         }
         WH_TEST_PRINT("SHE LOAD KEY UID checks SUCCESS\n");

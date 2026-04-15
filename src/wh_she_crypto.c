@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 wolfSSL Inc.
+ * Copyright (C) 2026 wolfSSL Inc.
  *
  * This file is part of wolfHSM.
  *
@@ -143,11 +143,18 @@ int wh_She_GenerateLoadableKey(uint8_t keyId,
             (keyId      << WH_SHE_M1_KID_SHIFT) |
             (authKeyId  << WH_SHE_M1_AID_SHIFT);
 
-        /* Build cleartext M2: set the counter, flags and key */
+        /* Build cleartext M2: set the counter, flags and key. The flag
+         * field layout here must match the server's _PopFlags: software
+         * bits 4..7 are placed at M2[3] bits 0..3, and software bit 0
+         * (WRITE_PROTECT) is placed at M2[4] bit 7. Only bits 0 and 4
+         * (WH_SHE_FLAG_WRITE_PROTECT and WH_SHE_FLAG_WILDCARD) round-trip
+         * through the wire; other software flag bits are silently
+         * dropped by _PopFlags. */
         memset(messageTwo, 0, WH_SHE_M2_SZ);
-        field = wh_Utils_htonl((count << WH_SHE_M2_COUNT_SHIFT) |
-                               (flags << WH_SHE_M2_FLAGS_SHIFT));
+        field = wh_Utils_htonl(count << WH_SHE_M2_COUNT_SHIFT);
         memcpy(messageTwo, &field, sizeof(uint32_t));
+        messageTwo[3] |= (uint8_t)((flags >> 4) & 0x0f);
+        messageTwo[4]  = (uint8_t)((flags & 0x01) << 7);
         memcpy(messageTwo + WH_SHE_M2_KEY_OFFSET, key, WH_SHE_KEY_SZ);
 
         /* encrypt M2 with K1 */

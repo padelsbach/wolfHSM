@@ -37,7 +37,7 @@
 #include "wolfhsm/wh_nvm_flash.h"
 
 #include "wh_test_common.h"
-#include "wh_test_nvm_flash.h"
+#include "wh_test_list.h"
 
 #define NVM_FLASH_SIZE       (1024 * 1024)
 #define NVM_FLASH_SECTOR_SZ  (4096)
@@ -96,7 +96,7 @@ static void _setup(void)
  * Exercises flash unit program/read/erase/blank-check
  * and byte-level read/write including unaligned access.
  */
-WH_TEST_MISC int test_flash_unit_ops(void* ctx)
+WH_TEST_MISC int whTest_FlashUnitOps(void* ctx)
 {
     whTestNvmFlashCtx* c = &_ctx;
     uint8_t write_bytes[8] = {
@@ -224,7 +224,7 @@ static int _addAndCheck(const whNvmCb* cb, void* context,
  * Add objects, overwrite, reclaim, destroy, verify
  * data integrity throughout.
  */
-WH_TEST_MISC int test_nvm_add_overwrite_destroy(void* ctx)
+WH_TEST_MISC int whTest_NvmAddOverwriteDestroy(void* ctx)
 {
     whTestNvmFlashCtx* c  = &_ctx;
     const whNvmCb*     cb = &c->nvmCb;

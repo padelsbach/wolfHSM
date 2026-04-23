@@ -33,7 +33,7 @@
 #include "wolfhsm/wh_flash_ramsim.h"
 
 #include "wh_test_common.h"
-#include "wh_test_flash_ramsim.h"
+#include "wh_test_list.h"
 
 #define TEST_FLASH_SIZE   (1024 * 1024)
 #define TEST_SECTOR_SIZE  (4096)
@@ -54,7 +54,7 @@ static void _fillTestData(uint8_t* buf, uint32_t size,
  * Verify that write-lock prevents erase and program, and that
  * unlock restores access.
  */
-WH_TEST_MISC int test_flash_write_lock(void* ctx)
+WH_TEST_MISC int whTest_FlashWriteLock(void* ctx)
 {
     int              ret;
     whFlashRamsimCtx fctx;
@@ -120,7 +120,7 @@ WH_TEST_MISC int test_flash_write_lock(void* ctx)
  * Erase every sector, program every page with known data,
  * verify, then erase again and blank-check.
  */
-WH_TEST_MISC int test_flash_erase_program_verify(void* ctx)
+WH_TEST_MISC int whTest_FlashEraseProgramVerify(void* ctx)
 {
     int              ret;
     whFlashRamsimCtx fctx;

@@ -216,11 +216,16 @@ int main(void)
     pthread_t sthread;
     pthread_t cthread;
     int       rc;
+    int       miscRc;
 
-    WH_TEST_RETURN_ON_FAIL(whTestGroup_Misc());
+    /* Run everything to the end so the summary reflects the
+     * whole suite; a misc failure doesn't skip the client or
+     * server groups. */
+    miscRc = whTestGroup_Misc();
 
     rc = pthread_create(&sthread, NULL, _serverThread, NULL);
     if (rc != 0) {
+        (void)whTestGroup_Summary();
         return rc;
     }
 
@@ -231,12 +236,18 @@ int main(void)
         (void)wh_Server_SetConnected(&_server,
             WH_COMM_DISCONNECTED);
         (void)pthread_join(sthread, NULL);
+        (void)whTestGroup_Summary();
         return rc;
     }
 
     (void)pthread_join(cthread, NULL);
     (void)pthread_join(sthread, NULL);
 
+    (void)whTestGroup_Summary();
+
+    if (miscRc != 0) {
+        return miscRc;
+    }
     if (_serverRc != 0) {
         return _serverRc;
     }

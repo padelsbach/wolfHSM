@@ -32,6 +32,20 @@ jobs:
         repository: wolfssl/wolfssl
         path: wolfssl
 
+    # Verify the committed wh_test_list.c matches what gen_test_list.py
+    # would produce for the current set of WH_TEST_* annotations. If a
+    # contributor adds/renames/removes a test without regenerating, this
+    # fails with a diff and a regeneration hint.
+    - name: Verify wh_test_list.c is up to date
+      run: |
+        cd test-refactor
+        python3 gen_test_list.py --output wh_test_list.c misc server client-server
+        if ! git diff --exit-code wh_test_list.c; then
+          echo "::error::wh_test_list.c is stale. Regenerate with:"
+          echo "::error::  cd test-refactor && python3 gen_test_list.py --output wh_test_list.c misc server client-server"
+          exit 1
+        fi
+
     - name: Build and test refactor
       run: cd test-refactor/posix && make clean && make -j WOLFSSL_DIR=../../wolfssl && make run
 

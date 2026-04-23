@@ -31,6 +31,7 @@
 #include "wolfhsm/wh_client.h"
 
 #include "wh_test_common.h"
+#include "wh_test_list.h"
 
 #define REPEAT_COUNT 10
 
@@ -38,7 +39,7 @@
  * Echo a message to the server and verify the response
  * matches. Repeats several times with different payloads.
  */
-WH_TEST_CLIENT int test_echo(whClientContext* ctx)
+WH_TEST_CLIENT int whTest_Echo(whClientContext* ctx)
 {
     char     send_buf[WOLFHSM_CFG_COMM_DATA_LEN];
     char     recv_buf[WOLFHSM_CFG_COMM_DATA_LEN];

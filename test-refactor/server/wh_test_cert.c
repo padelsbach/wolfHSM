@@ -34,7 +34,7 @@
 #include "wolfhsm/wh_server_cert.h"
 
 #include "wh_test_common.h"
-#include "wh_test_cert.h"
+#include "wh_test_list.h"
 #include "wh_test_cert_data.h"
 
 
@@ -42,7 +42,7 @@
  * Add trusted roots, verify valid and invalid certs/chains,
  * then remove roots.
  */
-WH_TEST_SERVER int test_cert_verify(whServerContext* ctx)
+WH_TEST_SERVER int whTest_CertVerify(whServerContext* ctx)
 {
     whServerContext* server = (whServerContext*)ctx;
     const whNvmId rootA = 1;

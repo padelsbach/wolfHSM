@@ -47,6 +47,15 @@ int whTestGroup_Misc(void);
 int whTestGroup_Server(whServerContext* server);
 int whTestGroup_Client(whClientContext* client);
 
+/*
+ * Print a wolfCrypt-style tally ("All N tests passed!" or
+ * "N passed, M skipped, K failed of T tests") using the
+ * counters accumulated by whTestGroup_{Misc,Server,Client}.
+ * Call once from main after the last group returns.
+ * Returns 0 if no failures, non-zero otherwise.
+ */
+int whTestGroup_Summary(void);
+
 
 /*
  * Caller-implemented reset hooks. The group functions invoke

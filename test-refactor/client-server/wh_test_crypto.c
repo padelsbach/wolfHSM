@@ -41,6 +41,7 @@
 #include "wolfhsm/wh_client.h"
 
 #include "wh_test_common.h"
+#include "wh_test_list.h"
 
 #ifndef NO_SHA256
 WH_TEST_CLIENT int whTest_CryptoSha256(whClientContext* ctx)
@@ -95,7 +96,7 @@ WH_TEST_CLIENT int whTest_CryptoSha256(whClientContext* ctx)
 
 
 #if !defined(NO_AES) && defined(HAVE_AES_CBC)
-WH_TEST_CLIENT int whTestCrypto_Aes(whClientContext* ctx)
+WH_TEST_CLIENT int whTest_CryptoAes(whClientContext* ctx)
 {
     int              devId = WH_DEV_ID;
     int              ret   = 0;
@@ -161,7 +162,7 @@ WH_TEST_CLIENT int whTestCrypto_Aes(whClientContext* ctx)
 
 
 #if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN) && defined(HAVE_ECC_VERIFY)
-WH_TEST_CLIENT int whTestCrypto_Ecc256(whClientContext* ctx)
+WH_TEST_CLIENT int whTest_CryptoEcc256(whClientContext* ctx)
 {
     int              devId  = WH_DEV_ID;
     int              ret    = 0;

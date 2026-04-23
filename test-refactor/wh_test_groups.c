@@ -19,164 +19,113 @@
 /*
  * test-refactor/wh_test_groups.c
  *
- * Portable group entry points. Each function runs every
- * suite that belongs to its group, gated by the applicable
- * compile-time config flags. Ports call these from main.
+ * Portable group entry points. Each walks its slice of the
+ * generated test registry (see wh_test_list.c) -- one array per
+ * group. Tests whose feature gate is off are resolved by the
+ * linker to the weak skip stub and surface as SKIPPED at
+ * runtime.
+ *
+ * Output format follows wolfCrypt convention:
+ *     whTest_Foo                    test passed!
+ *     whTest_Bar                    test skipped
+ *     whTest_Baz                    test FAILED (rc=-5)
+ * with a final whTestGroup_Summary() tally.
  */
+
+#include <string.h>
 
 #include "wolfhsm/wh_settings.h"
 
 #include "wh_test_common.h"
 #include "wh_test_groups.h"
+#include "wh_test_list.h"
 
-#if 0
-/* Misc group */
-#include "wh_test_flash_ramsim.h"
-#include "wh_test_nvm_flash.h"
-
-/* Server group */
-#if defined(WOLFHSM_CFG_CERTIFICATE_MANAGER) \
-    && !defined(WOLFHSM_CFG_NO_CRYPTO)
-#include "wh_test_cert.h"
-#endif
-
-/* Client group */
-#include "wh_test_echo.h"
-#include "wh_test_server_info.h"
-
-#if !defined(WOLFHSM_CFG_NO_CRYPTO)
-#include "wh_test_crypto.h"
-#endif
-#endif
-
-/*
- * Allow the build to redirect output for embedded targets that
- * lack stdout. Define WH_TEST_RUNNER_PRINTF before including
- * this file to override.
- */
 #ifndef WH_TEST_RUNNER_PRINTF
 #include <stdio.h>
 #define WH_TEST_RUNNER_PRINTF printf
 #endif
 
-#ifndef ARRAY_SIZE
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
+/* Column at which "test passed!" / "test skipped" / "test FAILED"
+ * starts. Pad the test name with spaces to line these up. Pick
+ * something a bit wider than the longest current name so future
+ * tests don't force a reformat. */
+#define WH_TEST_NAME_COL 40
 
-typedef enum {
-    WH_TEST_GROUP_MISC,
-    WH_TEST_GROUP_SERVER,
-    WH_TEST_GROUP_CLIENT,
-} whTestGroup;
+/* Per-process tallies. The POSIX port runs the groups
+ * sequentially (misc inline, then server, then client), so no
+ * locking is needed. Ports that invoke groups from concurrent
+ * threads must serialize the calls or add their own lock. */
+static int whTestPassed  = 0;
+static int whTestSkipped = 0;
+static int whTestFailed  = 0;
 
-typedef int (*whTestFn)(void* ctx);
-typedef struct whTestCase {
-    const char*     name;
-    whTestFn        fn;
-    whTestGroup     group;
-} whTestCase;
-
-#define WH_TEST_MISC_TEST(fn)   { #fn, fn, WH_TEST_GROUP_MISC }
-#define WH_TEST_SERVER_TEST(fn) { #fn, (whTestFn)fn, WH_TEST_GROUP_SERVER }
-#define WH_TEST_CLIENT_TEST(fn) { #fn, (whTestFn)fn, WH_TEST_GROUP_CLIENT }
-
-/* Pull in the list of tests (whTests) */
-#define INCLUDE_WH_TEST_LIST
-#include "wh_test_list.c"
-
-static const size_t whTestCount = ARRAY_SIZE(whTests);
-static int whTestResults[ARRAY_SIZE(whTests)] = {0};
-
-static int whTest_Run(const whTestCase* tests, size_t test_count, whTestGroup group, void* ctx)
+static void whTest_PrintResult(const char* name, int rc)
 {
-    const char* test_name = NULL;
-    size_t i = 0;
-
-    if (tests == NULL) {
-        return -1;
+    int pad = WH_TEST_NAME_COL - (int)strlen(name);
+    if (pad < 1) {
+        pad = 1;
     }
+    WH_TEST_RUNNER_PRINTF("%s%*s", name, pad, "");
 
-    /* Print test group name */
-    switch (group) {
-        case WH_TEST_GROUP_MISC:
-            WH_TEST_RUNNER_PRINTF("[test group] MISC\n");
-            break;
-        case WH_TEST_GROUP_SERVER:
-            WH_TEST_RUNNER_PRINTF("[test group] SERVER\n");
-            break;
-        case WH_TEST_GROUP_CLIENT:
-            WH_TEST_RUNNER_PRINTF("[test group] CLIENT\n");
-            break;
-        default:
-            WH_TEST_RUNNER_PRINTF("[test group] UNKNOWN\n");
-            break;
+    if (rc == 0) {
+        WH_TEST_RUNNER_PRINTF("test passed!\n");
+        whTestPassed++;
     }
+    else if (rc == WH_TEST_SKIPPED) {
+        WH_TEST_RUNNER_PRINTF("test skipped\n");
+        whTestSkipped++;
+    }
+    else {
+        WH_TEST_RUNNER_PRINTF("test FAILED (rc=%d)\n", rc);
+        whTestFailed++;
+    }
+}
 
-    for (i = 0; i < test_count; i++) {
-        if (tests[i].group != group) {
-            continue;
+static int whTest_Run(const whTestCase* tests, size_t count, void* ctx)
+{
+    int    overall = 0;
+    size_t i;
+
+    for (i = 0; i < count; i++) {
+        int rc = tests[i].fn(ctx);
+        whTest_PrintResult(tests[i].name, rc);
+
+        if (rc != 0 && rc != WH_TEST_SKIPPED && overall == 0) {
+            overall = rc;
         }
-
-        test_name = tests[i].name != NULL ? tests[i].name : "(unnamed)";
-
-        WH_TEST_RUNNER_PRINTF("[test case] %s\n",
-            test_name);
-
-        whTestResults[i] = tests[i].fn(ctx);
-
-        WH_TEST_RUNNER_PRINTF("[test case] %s: %s\n",
-            test_name, whTestResults[i] == 0 ? "PASSED" : "FAILED");
     }
 
-    return 0;
+    return overall;
 }
 
 
 int whTestGroup_Misc(void)
 {
-    whTest_Run(whTests, whTestCount, WH_TEST_GROUP_MISC, NULL);
-    return 0;
+    return whTest_Run(whTestsMisc, whTestsMiscCount, NULL);
 }
 
 int whTestGroup_Server(whServerContext* server)
 {
-    whTest_Run(whTests, whTestCount, WH_TEST_GROUP_SERVER, server);
-    return 0;
+    return whTest_Run(whTestsServer, whTestsServerCount, server);
 }
 
 int whTestGroup_Client(whClientContext* client)
 {
-    whTest_Run(whTests, whTestCount, WH_TEST_GROUP_CLIENT, client);
-    return 0;
+    return whTest_Run(whTestsClient, whTestsClientCount, client);
 }
 
-
-#if 0 
-int whTestGroup_Server(whServerContext* server)
+int whTestGroup_Summary(void)
 {
-#if defined(WOLFHSM_CFG_CERTIFICATE_MANAGER) \
-    && !defined(WOLFHSM_CFG_NO_CRYPTO)
-    WH_TEST_SUITE_RUN(&whTestSuite_Cert, server);
-    WH_TEST_RETURN_ON_FAIL(whTestGroup_ResetServer(server));
-#else
-    (void)server;
-#endif
-    return 0;
+    int total = whTestPassed + whTestSkipped + whTestFailed;
+
+    if (whTestFailed == 0 && whTestSkipped == 0) {
+        WH_TEST_RUNNER_PRINTF("All %d tests passed!\n", total);
+    }
+    else {
+        WH_TEST_RUNNER_PRINTF(
+            "%d passed, %d skipped, %d failed of %d tests\n",
+            whTestPassed, whTestSkipped, whTestFailed, total);
+    }
+
+    return whTestFailed == 0 ? 0 : -1;
 }
-
-
-int whTestGroup_Client(whClientContext* client)
-{
-    WH_TEST_SUITE_RUN(&whTestSuite_Echo, client);
-    WH_TEST_RETURN_ON_FAIL(whTestGroup_ResetClient(client));
-
-    WH_TEST_SUITE_RUN(&whTestSuite_ServerInfo, client);
-    WH_TEST_RETURN_ON_FAIL(whTestGroup_ResetClient(client));
-
-#if !defined(WOLFHSM_CFG_NO_CRYPTO)
-    WH_TEST_SUITE_RUN(&whTestSuite_Crypto, client);
-    WH_TEST_RETURN_ON_FAIL(whTestGroup_ResetClient(client));
-#endif
-    return 0;
-}
-#endif

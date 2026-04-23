@@ -20,3 +20,6 @@ tools/static-analysis/reports/
 *.gcda
 *.gcno
 coverage/
+
+# Test driver log (automake-style; produced by `make run` in test-refactor)
+test-suite.log

@@ -31,13 +31,14 @@
 #include "wolfhsm/wh_message_comm.h"
 
 #include "wh_test_common.h"
+#include "wh_test_list.h"
 
 
 /*
  * Query server info and verify the response contains
  * valid data.
  */
-WH_TEST_CLIENT int test_server_info(whClientContext* ctx)
+WH_TEST_CLIENT int whTest_ServerInfo(whClientContext* ctx)
 {
     uint8_t  version[WH_INFO_VERSION_LEN + 1] = {0};
     uint8_t  build[WH_INFO_VERSION_LEN + 1]   = {0};

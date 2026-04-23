@@ -31,19 +31,15 @@
 #include "wolfhsm/wh_client.h"
 
 #include "wh_test_common.h"
-#include "wh_test_runner.h"
-#include "wh_test_echo.h"
 
 #define REPEAT_COUNT 10
-
 
 /*
  * Echo a message to the server and verify the response
  * matches. Repeats several times with different payloads.
  */
-static int test_echo(void* ctx)
+WH_TEST_CLIENT int test_echo(whClientContext* ctx)
 {
-    whClientContext* client = (whClientContext*)ctx;
     char     send_buf[WOLFHSM_CFG_COMM_DATA_LEN];
     char     recv_buf[WOLFHSM_CFG_COMM_DATA_LEN];
     uint16_t send_len = 0;
@@ -58,7 +54,7 @@ static int test_echo(void* ctx)
         memset(recv_buf, 0, sizeof(recv_buf));
 
         WH_TEST_RETURN_ON_FAIL(
-            wh_Client_Echo(client,
+            wh_Client_Echo(ctx,
                 send_len, send_buf,
                 &recv_len, recv_buf));
 
@@ -69,12 +65,3 @@ static int test_echo(void* ctx)
 
     return 0;
 }
-
-
-static whTestFn _tests[] = {
-    test_echo,
-    NULL
-};
-
-whTestSuite whTestSuite_Echo =
-    WH_TEST_SUITE("Echo", _tests);

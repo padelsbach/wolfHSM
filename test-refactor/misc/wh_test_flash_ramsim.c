@@ -54,7 +54,7 @@ static void _fillTestData(uint8_t* buf, uint32_t size,
  * Verify that write-lock prevents erase and program, and that
  * unlock restores access.
  */
-static int test_flash_write_lock(void* ctx)
+WH_TEST_MISC int test_flash_write_lock(void* ctx)
 {
     int              ret;
     whFlashRamsimCtx fctx;
@@ -120,7 +120,7 @@ static int test_flash_write_lock(void* ctx)
  * Erase every sector, program every page with known data,
  * verify, then erase again and blank-check.
  */
-static int test_flash_erase_program_verify(void* ctx)
+WH_TEST_MISC int test_flash_erase_program_verify(void* ctx)
 {
     int              ret;
     whFlashRamsimCtx fctx;
@@ -226,15 +226,3 @@ static int test_flash_erase_program_verify(void* ctx)
     whFlashRamsim_Cleanup(&fctx);
     return 0;
 }
-
-
-static whTestFn _tests[] = {
-    test_flash_write_lock,
-    test_flash_erase_program_verify,
-    NULL
-};
-
-whTestSuite whTestSuite_FlashRamSim = {
-    .name  = "Flash RamSim",
-    .tests = _tests,
-};

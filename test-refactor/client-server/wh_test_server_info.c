@@ -31,17 +31,14 @@
 #include "wolfhsm/wh_message_comm.h"
 
 #include "wh_test_common.h"
-#include "wh_test_runner.h"
-#include "wh_test_server_info.h"
 
 
 /*
  * Query server info and verify the response contains
  * valid data.
  */
-static int test_server_info(void* ctx)
+WH_TEST_CLIENT int test_server_info(whClientContext* ctx)
 {
-    whClientContext* client = (whClientContext*)ctx;
     uint8_t  version[WH_INFO_VERSION_LEN + 1] = {0};
     uint8_t  build[WH_INFO_VERSION_LEN + 1]   = {0};
     uint32_t comm_data_len     = 0;
@@ -58,7 +55,7 @@ static int test_server_info(void* ctx)
     uint32_t nvm_state         = 0;
 
     WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CommInfo(client,
+        wh_Client_CommInfo(ctx,
             version, build,
             &comm_data_len,
             &nvm_object_count,
@@ -78,12 +75,3 @@ static int test_server_info(void* ctx)
 
     return 0;
 }
-
-
-static whTestFn _tests[] = {
-    test_server_info,
-    NULL
-};
-
-whTestSuite whTestSuite_ServerInfo =
-    WH_TEST_SUITE("ServerInfo", _tests);

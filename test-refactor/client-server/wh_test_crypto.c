@@ -41,13 +41,10 @@
 #include "wolfhsm/wh_client.h"
 
 #include "wh_test_common.h"
-#include "wh_test_runner.h"
-#include "wh_test_crypto.h"
 
 #ifndef NO_SHA256
-static int whTest_CryptoSha256(void* c)
+WH_TEST_CLIENT int whTest_CryptoSha256(whClientContext* ctx)
 {
-    whClientContext* ctx   = (whClientContext*)c;
     int              devId = WH_DEV_ID;
     int              ret   = WH_ERROR_OK;
     wc_Sha256        sha256[1];
@@ -98,9 +95,8 @@ static int whTest_CryptoSha256(void* c)
 
 
 #if !defined(NO_AES) && defined(HAVE_AES_CBC)
-static int whTestCrypto_Aes(void* c)
+WH_TEST_CLIENT int whTestCrypto_Aes(whClientContext* ctx)
 {
-    whClientContext* ctx   = (whClientContext*)c;
     int              devId = WH_DEV_ID;
     int              ret   = 0;
     Aes              aes[1];
@@ -165,9 +161,8 @@ static int whTestCrypto_Aes(void* c)
 
 
 #if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN) && defined(HAVE_ECC_VERIFY)
-static int whTestCrypto_Ecc256(void* c)
+WH_TEST_CLIENT int whTestCrypto_Ecc256(whClientContext* ctx)
 {
-    whClientContext* ctx    = (whClientContext*)c;
     int              devId  = WH_DEV_ID;
     int              ret    = 0;
     WC_RNG           rng[1];
@@ -220,22 +215,5 @@ static int whTestCrypto_Ecc256(void* c)
     return ret;
 }
 #endif /* HAVE_ECC && HAVE_ECC_SIGN && HAVE_ECC_VERIFY */
-
-
-static whTestFn _tests[] = {
-#ifndef NO_SHA256
-    whTest_CryptoSha256,
-#endif
-#if !defined(NO_AES) && defined(HAVE_AES_CBC)
-    whTestCrypto_Aes,
-#endif
-#if defined(HAVE_ECC) && defined(HAVE_ECC_SIGN) && defined(HAVE_ECC_VERIFY)
-    whTestCrypto_Ecc256,
-#endif
-    NULL
-};
-
-whTestSuite whTestSuite_Crypto =
-    WH_TEST_SUITE("Crypto", _tests);
 
 #endif /* !WOLFHSM_CFG_NO_CRYPTO */

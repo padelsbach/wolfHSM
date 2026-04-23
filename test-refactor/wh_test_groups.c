@@ -27,9 +27,9 @@
 #include "wolfhsm/wh_settings.h"
 
 #include "wh_test_common.h"
-#include "wh_test_runner.h"
 #include "wh_test_groups.h"
 
+#if 0
 /* Misc group */
 #include "wh_test_flash_ramsim.h"
 #include "wh_test_nvm_flash.h"
@@ -47,16 +47,111 @@
 #if !defined(WOLFHSM_CFG_NO_CRYPTO)
 #include "wh_test_crypto.h"
 #endif
+#endif
 
+/*
+ * Allow the build to redirect output for embedded targets that
+ * lack stdout. Define WH_TEST_RUNNER_PRINTF before including
+ * this file to override.
+ */
+#ifndef WH_TEST_RUNNER_PRINTF
+#include <stdio.h>
+#define WH_TEST_RUNNER_PRINTF printf
+#endif
 
-int whTestGroup_Misc(void)
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
+typedef enum {
+    WH_TEST_GROUP_MISC,
+    WH_TEST_GROUP_SERVER,
+    WH_TEST_GROUP_CLIENT,
+} whTestGroup;
+
+typedef int (*whTestFn)(void* ctx);
+typedef struct whTestCase {
+    const char*     name;
+    whTestFn        fn;
+    whTestGroup     group;
+} whTestCase;
+
+#define WH_TEST_MISC_TEST(fn)   { #fn, fn, WH_TEST_GROUP_MISC }
+#define WH_TEST_SERVER_TEST(fn) { #fn, (whTestFn)fn, WH_TEST_GROUP_SERVER }
+#define WH_TEST_CLIENT_TEST(fn) { #fn, (whTestFn)fn, WH_TEST_GROUP_CLIENT }
+
+/* Pull in the list of tests (whTests) */
+#define INCLUDE_WH_TEST_LIST
+#include "wh_test_list.c"
+
+static const size_t whTestCount = ARRAY_SIZE(whTests);
+static int whTestResults[ARRAY_SIZE(whTests)] = {0};
+
+static int whTest_Run(const whTestCase* tests, size_t test_count, whTestGroup group, void* ctx)
 {
-    WH_TEST_SUITE_RUN(&whTestSuite_FlashRamSim, NULL);
-    WH_TEST_SUITE_RUN(&whTestSuite_NvmFlash, NULL);
+    const char* test_name = NULL;
+    size_t i = 0;
+
+    if (tests == NULL) {
+        return -1;
+    }
+
+    /* Print test group name */
+    switch (group) {
+        case WH_TEST_GROUP_MISC:
+            WH_TEST_RUNNER_PRINTF("[test group] MISC\n");
+            break;
+        case WH_TEST_GROUP_SERVER:
+            WH_TEST_RUNNER_PRINTF("[test group] SERVER\n");
+            break;
+        case WH_TEST_GROUP_CLIENT:
+            WH_TEST_RUNNER_PRINTF("[test group] CLIENT\n");
+            break;
+        default:
+            WH_TEST_RUNNER_PRINTF("[test group] UNKNOWN\n");
+            break;
+    }
+
+    for (i = 0; i < test_count; i++) {
+        if (tests[i].group != group) {
+            continue;
+        }
+
+        test_name = tests[i].name != NULL ? tests[i].name : "(unnamed)";
+
+        WH_TEST_RUNNER_PRINTF("[test case] %s\n",
+            test_name);
+
+        whTestResults[i] = tests[i].fn(ctx);
+
+        WH_TEST_RUNNER_PRINTF("[test case] %s: %s\n",
+            test_name, whTestResults[i] == 0 ? "PASSED" : "FAILED");
+    }
+
     return 0;
 }
 
 
+int whTestGroup_Misc(void)
+{
+    whTest_Run(whTests, whTestCount, WH_TEST_GROUP_MISC, NULL);
+    return 0;
+}
+
+int whTestGroup_Server(whServerContext* server)
+{
+    whTest_Run(whTests, whTestCount, WH_TEST_GROUP_SERVER, server);
+    return 0;
+}
+
+int whTestGroup_Client(whClientContext* client)
+{
+    whTest_Run(whTests, whTestCount, WH_TEST_GROUP_CLIENT, client);
+    return 0;
+}
+
+
+#if 0 
 int whTestGroup_Server(whServerContext* server)
 {
 #if defined(WOLFHSM_CFG_CERTIFICATE_MANAGER) \
@@ -84,3 +179,4 @@ int whTestGroup_Client(whClientContext* client)
 #endif
     return 0;
 }
+#endif

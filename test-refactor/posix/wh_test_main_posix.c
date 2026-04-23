@@ -57,7 +57,6 @@
 #include "wh_test_posix_threadsafe_stress.h"
 #endif
 
-
 /*
  * Port-owned contexts. The thread functions fill these in and
  * hand them to the group functions, paralleling the firmware

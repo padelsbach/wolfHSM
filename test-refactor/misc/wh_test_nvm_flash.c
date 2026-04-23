@@ -96,7 +96,7 @@ static void _setup(void)
  * Exercises flash unit program/read/erase/blank-check
  * and byte-level read/write including unaligned access.
  */
-static int test_flash_unit_ops(void* ctx)
+WH_TEST_MISC int test_flash_unit_ops(void* ctx)
 {
     whTestNvmFlashCtx* c = &_ctx;
     uint8_t write_bytes[8] = {
@@ -224,7 +224,7 @@ static int _addAndCheck(const whNvmCb* cb, void* context,
  * Add objects, overwrite, reclaim, destroy, verify
  * data integrity throughout.
  */
-static int test_nvm_add_overwrite_destroy(void* ctx)
+WH_TEST_MISC int test_nvm_add_overwrite_destroy(void* ctx)
 {
     whTestNvmFlashCtx* c  = &_ctx;
     const whNvmCb*     cb = &c->nvmCb;
@@ -300,15 +300,3 @@ static int test_nvm_add_overwrite_destroy(void* ctx)
 
     return 0;
 }
-
-
-static whTestFn _tests[] = {
-    test_flash_unit_ops,
-    test_nvm_add_overwrite_destroy,
-    NULL
-};
-
-whTestSuite whTestSuite_NvmFlash = {
-    .name  = "NVM Flash",
-    .tests = _tests,
-};

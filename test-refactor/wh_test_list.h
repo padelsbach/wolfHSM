@@ -1,5 +1,4 @@
-/*
- * Copyright (C) 2026 wolfSSL Inc.
+/* Copyright (C) 2026 wolfSSL Inc.
  *
  * This file is part of wolfHSM.
  *
@@ -16,17 +15,11 @@
  * You should have received a copy of the GNU General Public License
  * along with wolfHSM.  If not, see <http://www.gnu.org/licenses/>.
  */
-/*
- * test-refactor/wh_test_server_info.h
- *
- * Server info query test suite.
- */
 
-#ifndef WH_TEST_SERVER_INFO_REFACTOR_H_
-#define WH_TEST_SERVER_INFO_REFACTOR_H_
-
-#include "wh_test_runner.h"
-
-extern whTestSuite whTestSuite_ServerInfo;
-
-#endif /* WH_TEST_SERVER_INFO_REFACTOR_H_ */
+ /*
+  Empty macros for use by the pre-processing script to identify which tests 
+  belong to which groups.
+  */
+#define WH_TEST_MISC
+#define WH_TEST_CLIENT
+#define WH_TEST_SERVER

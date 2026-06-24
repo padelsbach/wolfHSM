@@ -19,155 +19,144 @@
 /*
  * test-refactor/client-server/wh_test_counter.c
  *
- * Exercise the persistent NVM counter API: init/reset,
- * sequential increment past WOLFHSM_CFG_NVM_OBJECT_COUNT (catches
- * slot leaks), saturate-on-overflow at UINT32_MAX, and
- * reset+destroy across many slots.
+ * NVM monotonic counter round-trips routed through the server. Covers
+ * reset/init/increment/read/destroy, increment saturation at the uint32_t
+ * max, and slot reuse across more counters than the NVM directory holds.
+ *
+ * The counter API is carried by dedicated counter messages, not the
+ * cryptocb, so it is identical across the DMA and non-DMA builds. The
+ * WOLFHSM_CFG_DMA build option is covered by compiling and running this
+ * test under that configuration, not by toggling the client DMA mode.
  */
 
 #include <stdint.h>
-#include <stddef.h>
 
 #include "wolfhsm/wh_settings.h"
-#include "wolfhsm/wh_common.h"
 #include "wolfhsm/wh_error.h"
+#include "wolfhsm/wh_common.h"
 #include "wolfhsm/wh_client.h"
 
 #include "wh_test_common.h"
 #include "wh_test_list.h"
 
+/* Increment well past the NVM directory size to confirm a single counter
+ * reuses one slot rather than leaking an object per increment. */
+#define WH_TEST_COUNTER_INCREMENTS (2 * WOLFHSM_CFG_NVM_OBJECT_COUNT)
 
-/*
- * Verify counter can update more than WOLFHSM_CFG_NVM_OBJECT_COUNT times.
- * Each increment should reuse the same slot.
- */
-static int _whTest_CounterSequentialIncrement(whClientContext* ctx)
+/* Reads the current count of free NVM objects, failing on a server error. */
+static int _whTest_CounterAvailObjects(whClientContext* ctx,
+                                       whNvmId*         outAvailObjects)
 {
-    const whNvmId counterId      = 1;
-    const size_t  NUM_INCREMENTS = 2u * WOLFHSM_CFG_NVM_OBJECT_COUNT;
-    size_t        i;
-    uint32_t      counter        = 0;
+    int32_t  serverRc       = 0;
+    uint32_t availSize       = 0;
+    uint32_t reclaimSize     = 0;
+    whNvmId  availObjects     = 0;
+    whNvmId  reclaimObjects   = 0;
 
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterReset(ctx, counterId, &counter));
+    WH_TEST_RETURN_ON_FAIL(wh_Client_NvmGetAvailable(
+        ctx, &serverRc, &availSize, &availObjects, &reclaimSize,
+        &reclaimObjects));
+    WH_TEST_ASSERT_RETURN(serverRc == WH_ERROR_OK);
+
+    *outAvailObjects = availObjects;
+    return WH_ERROR_OK;
+}
+
+/* Reset, increment past the directory size, and saturate a single counter. */
+static int _whTest_CounterIncrement(whClientContext* ctx)
+{
+    const whNvmId  counterId       = 1;
+    const uint32_t maxCounterVal   = 0xFFFFFFFF;
+    size_t         i               = 0;
+    uint32_t       counter         = 0;
+
+    /* A fresh counter starts at zero. */
+    WH_TEST_RETURN_ON_FAIL(wh_Client_CounterReset(ctx, counterId, &counter));
     WH_TEST_ASSERT_RETURN(counter == 0);
 
-    for (i = 0; i < NUM_INCREMENTS; i++) {
+    /* Each increment advances by one and read-back matches, with no object
+     * leak across more increments than the directory could hold. */
+    for (i = 0; i < WH_TEST_COUNTER_INCREMENTS; i++) {
         WH_TEST_RETURN_ON_FAIL(
             wh_Client_CounterIncrement(ctx, counterId, &counter));
-        WH_TEST_ASSERT_RETURN(counter == (uint32_t)(i + 1));
+        WH_TEST_ASSERT_RETURN(counter == i + 1);
 
         WH_TEST_RETURN_ON_FAIL(
             wh_Client_CounterRead(ctx, counterId, &counter));
-        WH_TEST_ASSERT_RETURN(counter == (uint32_t)(i + 1));
+        WH_TEST_ASSERT_RETURN(counter == i + 1);
     }
 
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterReset(ctx, counterId, &counter));
+    WH_TEST_RETURN_ON_FAIL(wh_Client_CounterReset(ctx, counterId, &counter));
     WH_TEST_ASSERT_RETURN(counter == 0);
 
+    /* Init near the max and confirm increments saturate instead of rolling. */
+    counter = maxCounterVal;
+    WH_TEST_RETURN_ON_FAIL(wh_Client_CounterInit(ctx, counterId, &counter));
+    WH_TEST_ASSERT_RETURN(counter == maxCounterVal);
+
     WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterDestroy(ctx, counterId));
+        wh_Client_CounterIncrement(ctx, counterId, &counter));
+    WH_TEST_ASSERT_RETURN(counter == maxCounterVal);
+
+    WH_TEST_RETURN_ON_FAIL(
+        wh_Client_CounterIncrement(ctx, counterId, &counter));
+    WH_TEST_ASSERT_RETURN(counter == maxCounterVal);
+
+    WH_TEST_RETURN_ON_FAIL(wh_Client_CounterRead(ctx, counterId, &counter));
+    WH_TEST_ASSERT_RETURN(counter == maxCounterVal);
+
+    WH_TEST_RETURN_ON_FAIL(wh_Client_CounterReset(ctx, counterId, &counter));
+    WH_TEST_ASSERT_RETURN(counter == 0);
+
+    WH_TEST_RETURN_ON_FAIL(wh_Client_CounterDestroy(ctx, counterId));
 
     return WH_ERROR_OK;
 }
 
-
-/*
- * Verify the counter saturates at UINT32_MAX and does not wrap.
- */
-static int _whTest_CounterSaturate(whClientContext* ctx)
+/* Create and destroy counters across many ids, confirming destroy frees the
+ * slot and a destroyed counter can no longer be read. */
+static int _whTest_CounterDestroy(whClientContext* ctx)
 {
-    const whNvmId  counterId   = 1;
-    const uint32_t MAX_COUNTER = 0xFFFFFFFFu;
-    uint32_t       counter     = MAX_COUNTER;
+    size_t   i       = 0;
+    uint32_t counter = 0;
 
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterInit(ctx, counterId, &counter));
-    WH_TEST_ASSERT_RETURN(counter == MAX_COUNTER);
-
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterIncrement(ctx, counterId, &counter));
-    WH_TEST_ASSERT_RETURN(counter == MAX_COUNTER);
-
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterIncrement(ctx, counterId, &counter));
-    WH_TEST_ASSERT_RETURN(counter == MAX_COUNTER);
-
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterRead(ctx, counterId, &counter));
-    WH_TEST_ASSERT_RETURN(counter == MAX_COUNTER);
-
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterReset(ctx, counterId, &counter));
-    WH_TEST_ASSERT_RETURN(counter == 0);
-
-    WH_TEST_RETURN_ON_FAIL(
-        wh_Client_CounterDestroy(ctx, counterId));
-
-    return WH_ERROR_OK;
-}
-
-
-/*
- * Reset+destroy across many slots: catches leaks in the destroy
- * path and confirms that a destroyed counter reads back as
- * NOTFOUND.
- */
-static int _whTest_CounterDestroyMany(whClientContext* ctx)
-{
-    const size_t NUM_SLOTS = 2u * WOLFHSM_CFG_NVM_OBJECT_COUNT;
-    size_t       i;
-    uint32_t     counter;
-
-    for (i = 1; i < NUM_SLOTS; i++) {
+    for (i = 1; i < WH_TEST_COUNTER_INCREMENTS; i++) {
         WH_TEST_RETURN_ON_FAIL(
             wh_Client_CounterReset(ctx, (whNvmId)i, &counter));
         WH_TEST_ASSERT_RETURN(counter == 0);
 
-        WH_TEST_RETURN_ON_FAIL(
-            wh_Client_CounterDestroy(ctx, (whNvmId)i));
+        WH_TEST_RETURN_ON_FAIL(wh_Client_CounterDestroy(ctx, (whNvmId)i));
 
-        WH_TEST_ASSERT_RETURN(WH_ERROR_NOTFOUND ==
+        /* A destroyed counter must not be readable. */
+        WH_TEST_ASSERT_RETURN(
+            WH_ERROR_NOTFOUND ==
             wh_Client_CounterRead(ctx, (whNvmId)i, &counter));
     }
 
     return WH_ERROR_OK;
 }
 
-
+/*
+ * NVM counter API test. Brackets the sub-tests with an NVM object census so
+ * the no-leak guarantee holds regardless of any objects other tests left
+ * behind in the shared server.
+ */
 int whTest_Counter(whClientContext* ctx)
 {
-    int32_t  server_rc       = 0;
-    uint32_t client_id       = 0;
-    uint32_t server_id       = 0;
-    uint32_t avail_size      = 0;
-    uint32_t reclaim_size    = 0;
-    whNvmId  avail_objects   = 0;
-    whNvmId  reclaim_objects = 0;
-    whNvmId  baseline        = 0;
+    whNvmId baselineObjects = 0;
+    whNvmId finalObjects    = 0;
 
-    WH_TEST_RETURN_ON_FAIL(wh_Client_NvmInit(
-        ctx, &server_rc, &client_id, &server_id));
-    WH_TEST_ASSERT_RETURN(server_rc == WH_ERROR_OK);
+    WH_TEST_PRINT("Testing NVM counters...\n");
 
-    WH_TEST_RETURN_ON_FAIL(wh_Client_NvmGetAvailable(
-        ctx, &server_rc, &avail_size, &avail_objects,
-        &reclaim_size, &reclaim_objects));
-    WH_TEST_ASSERT_RETURN(server_rc == WH_ERROR_OK);
-    baseline = avail_objects;
+    WH_TEST_RETURN_ON_FAIL(
+        _whTest_CounterAvailObjects(ctx, &baselineObjects));
 
-    WH_TEST_RETURN_ON_FAIL(_whTest_CounterSequentialIncrement(ctx));
-    WH_TEST_RETURN_ON_FAIL(_whTest_CounterSaturate(ctx));
-    WH_TEST_RETURN_ON_FAIL(_whTest_CounterDestroyMany(ctx));
+    WH_TEST_RETURN_ON_FAIL(_whTest_CounterIncrement(ctx));
+    WH_TEST_RETURN_ON_FAIL(_whTest_CounterDestroy(ctx));
 
-    /* No object slots leaked: available count is back where we
-     * started before the test ran. */
-    WH_TEST_RETURN_ON_FAIL(wh_Client_NvmGetAvailable(
-        ctx, &server_rc, &avail_size, &avail_objects,
-        &reclaim_size, &reclaim_objects));
-    WH_TEST_ASSERT_RETURN(server_rc == WH_ERROR_OK);
-    WH_TEST_ASSERT_RETURN(avail_objects == baseline);
+    /* Reset and destroy must not leak NVM objects. */
+    WH_TEST_RETURN_ON_FAIL(_whTest_CounterAvailObjects(ctx, &finalObjects));
+    WH_TEST_ASSERT_RETURN(finalObjects == baselineObjects);
 
     return WH_ERROR_OK;
 }

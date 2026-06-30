@@ -36,7 +36,8 @@ jobs:
       - name: Checkout wolfBoot master
         uses: actions/checkout@v4
         with:
-          repository: wolfSSL/wolfBoot
+          repository: padelsbach/wolfBoot
+          ref: fix-wolfhsm-nightly
           path: wolfBoot
           # Skip lib/wolfHSM submodule init - we replace it with this
           # checkout. Other submodules still need to come down.

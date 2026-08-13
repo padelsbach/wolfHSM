@@ -22,10 +22,15 @@ please refer to the following resources.
 
 ## Formatting
 
-Enable the pre-commit clang-format check, once per clone:
+Changed lines must be clang-format clean. CI checks this on every pull
+request, and the same check can be run locally:
 
     sudo apt-get install -y clang-format-18
-    git config core.hooksPath .githooks
+    .github/scripts/clang-format-check.sh
+
+To run it on every commit, install it as a hook in your own clone:
+
+    ln -s ../../.github/scripts/clang-format-check.sh .git/hooks/pre-commit
 
 ## Resources
 

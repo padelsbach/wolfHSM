@@ -44,6 +44,12 @@ DEF += -DWOLFHSM_CFG_TEST_POSIX
 DEF += -DWOLFHSM_CFG_ENABLE_CLIENT
 DEF += -DWOLFHSM_CFG_ENABLE_SERVER
 
+# Drop SHAKE, leaving SHA3-224/256/384/512, so the Keccak feature guards are
+# exercised without the extendable output functions beside them.
+ifeq ($(SHA3_NO_SHAKE),1)
+    DEF += -DWOLFHSM_CFG_TEST_SHA3_NO_SHAKE
+endif
+
 # C standard
 CSTD        ?= -std=c90
 

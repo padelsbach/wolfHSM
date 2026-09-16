@@ -628,6 +628,38 @@ int wh_Client_CryptoCbStd(int devId, wc_CryptoInfo* info, void* inCtx)
                 ret = wh_Client_Sha512(ctx, sha, in, inLen, out);
             } break;
 #endif /* WOLFSSL_SHA512 && WOLFSSL_SHA512_HASHTYPE */
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+#ifdef WOLFSSL_SHA3
+            case WC_HASH_TYPE_SHA3_224:
+            case WC_HASH_TYPE_SHA3_256:
+            case WC_HASH_TYPE_SHA3_384:
+            case WC_HASH_TYPE_SHA3_512:
+#endif
+#ifdef WOLFSSL_SHAKE128
+            case WC_HASH_TYPE_SHAKE128:
+#endif
+#ifdef WOLFSSL_SHAKE256
+            case WC_HASH_TYPE_SHAKE256:
+#endif
+            {
+                /* SHA3 and SHAKE share a handler: both arrive as a wc_Sha3,
+                 * and outSz is set only by SHAKE, whose length the caller
+                 * chooses. */
+                wc_Sha3*       sha   = info->hash.sha3;
+                const uint8_t* in    = info->hash.in;
+                uint32_t       inLen = info->hash.inSz;
+                uint8_t*       out   = info->hash.digest;
+
+                ret = wh_Client_Sha3(ctx, sha, info->hash.type, in, inLen, out,
+                                     info->hash.outSz);
+                /* More SHAKE output than a response can carry: leave it to
+                 * software, which resumes from the sponge the client holds. */
+                if (ret == WH_ERROR_NOSPACE) {
+                    ret = CRYPTOCB_UNAVAILABLE;
+                }
+            } break;
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
             default:
                 ret = CRYPTOCB_UNAVAILABLE;
                 break;

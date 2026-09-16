@@ -705,6 +705,37 @@ int wh_MessageCrypto_TranslateSha2Response(
 }
 
 
+/* The Keccak state and the input and output data trail these structs and are
+ * byte arrays, so neither translation touches them. */
+int wh_MessageCrypto_TranslateSha3Request(
+    uint16_t magic, const whMessageCrypto_Sha3Request* src,
+    whMessageCrypto_Sha3Request* dest)
+{
+    if ((src == NULL) || (dest == NULL)) {
+        return WH_ERROR_BADARGS;
+    }
+    WH_T32(magic, dest, src, hashType);
+    WH_T32(magic, dest, src, isLastBlock);
+    WH_T32(magic, dest, src, stateSz);
+    WH_T32(magic, dest, src, inSz);
+    WH_T32(magic, dest, src, outSz);
+    return 0;
+}
+
+int wh_MessageCrypto_TranslateSha3Response(
+    uint16_t magic, const whMessageCrypto_Sha3Response* src,
+    whMessageCrypto_Sha3Response* dest)
+{
+    if ((src == NULL) || (dest == NULL)) {
+        return WH_ERROR_BADARGS;
+    }
+    WH_T32(magic, dest, src, hashType);
+    WH_T32(magic, dest, src, stateSz);
+    WH_T32(magic, dest, src, outSz);
+    return 0;
+}
+
+
 /* CMAC-AES State translation */
 int wh_MessageCrypto_TranslateCmacAesState(
     uint16_t magic, const whMessageCrypto_CmacAesState* src,

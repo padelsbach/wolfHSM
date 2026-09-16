@@ -47,6 +47,33 @@
 
 #include "wolfhsm/wh_message_crypto.h"
 
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+#include "wolfssl/wolfcrypt/sha3.h"
+
+/* Largest rate of the Keccak variants wolfHSM carries, which is SHAKE128's. A
+ * weaker variant has a larger rate, so this exceeds every SHA3-* block size
+ * and a buffer sized for those is too small. */
+#define WH_SHA3_MAX_RATE (WC_SHA3_128_COUNT * 8u)
+
+/* Rate in bytes for a Keccak variant, or 0 if not one wolfHSM carries.
+ *
+ * The 200-byte Keccak state splits into a rate and a capacity. The rate is the
+ * part message bytes are absorbed into and output is squeezed out of, so it is
+ * the block size in the usual sense; the capacity is never touched from
+ * outside and is what provides the security margin, at twice the variant's
+ * strength. Stronger variant, larger capacity, smaller rate: SHA3-512 absorbs
+ * 72 bytes per permutation while SHAKE128 absorbs 168.
+ *
+ * Every variant shares the same state and differs only here and in the
+ * padding. */
+uint32_t wh_Crypto_Sha3Rate(int hashType);
+
+/* Digest size for a fixed-length Keccak variant, or 0 for a SHAKE, whose
+ * output length the caller chooses. */
+uint32_t wh_Crypto_Sha3DigestSz(int hashType);
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
+
 #ifdef WOLFSSL_CMAC
 /* Save portable CMAC state from a Cmac context into a message state struct */
 void wh_Crypto_CmacAesSaveStateToMsg(whMessageCrypto_CmacAesState* state,

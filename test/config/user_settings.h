@@ -132,14 +132,21 @@
 #define WOLFSSL_SHA512
 #define WOLFSSL_SHA512_HASHTYPE
 
-/* ML-DSA Options */
-#define WOLFSSL_HAVE_MLDSA
+/* SHA-3 Options. Enabled in their own right, not only because ML-DSA and
+ * ML-KEM below need them. Building with SHA3_NO_SHAKE drops the extendable
+ * output functions so the SHA-3 guards are checked without them, and takes
+ * ML-DSA and ML-KEM with it because both are built on SHAKE. */
 #define WOLFSSL_SHA3
+#ifndef WOLFHSM_CFG_TEST_SHA3_NO_SHAKE
 #define WOLFSSL_SHAKE128
 #define WOLFSSL_SHAKE256
 
+/* ML-DSA Options */
+#define WOLFSSL_HAVE_MLDSA
+
 /* ML-KEM Options */
 #define WOLFSSL_HAVE_MLKEM
+#endif /* !WOLFHSM_CFG_TEST_SHA3_NO_SHAKE */
 /* LMS / HSS Options (RFC 8554, NIST SP 800-208) */
 #define WOLFSSL_HAVE_LMS
 

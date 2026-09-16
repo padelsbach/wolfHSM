@@ -8093,6 +8093,363 @@ int wh_Client_Sha512(whClientContext* ctx, wc_Sha512* sha512, const uint8_t* in,
     return ret;
 }
 
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+/* True while the sponge has never been advanced, which lets the first message
+ * of a hash leave the state off the wire. A state that has absorbed anything
+ * is all-zero only with probability 2^-1600, so the scan is exact in practice
+ * and costs nothing beside the hashing it saves. */
+static int _Sha3StateIsInitial(const wc_Sha3* sha)
+{
+    size_t i;
+
+    for (i = 0; i < sizeof(sha->s) / sizeof(sha->s[0]); i++) {
+        if (sha->s[i] != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Bytes of input a single update can take: what fits inline, plus whatever it
+ * takes to top up the partial block already held locally. */
+static uint32_t _Sha3UpdatePerCallCapacity(const wc_Sha3* sha, int hashType)
+{
+    uint32_t rate = wh_Crypto_Sha3Rate(hashType);
+    uint32_t inlineSz;
+
+    if (rate == 0) {
+        return 0;
+    }
+    inlineSz = _Sha3StateIsInitial(sha)
+                   ? ((WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_ONESHOT_SZ / rate) *
+                      rate)
+                   : WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_UPDATE_SZ(rate);
+    return inlineSz + (rate - 1u - sha->i);
+}
+
+/* Fill in the fixed fields and the optional state, and return where the input
+ * data should be written. */
+static uint8_t* _Sha3FillRequest(whMessageCrypto_Sha3Request* req,
+                                 const wc_Sha3* sha, int hashType,
+                                 uint32_t isLastBlock, uint32_t outSz)
+{
+    uint8_t* after = (uint8_t*)(req + 1);
+
+    req->hashType    = (uint32_t)hashType;
+    req->isLastBlock = isLastBlock;
+    req->outSz       = outSz;
+    req->inSz        = 0;
+
+    if (_Sha3StateIsInitial(sha)) {
+        req->stateSz = 0;
+    }
+    else {
+        req->stateSz = WH_MESSAGE_CRYPTO_SHA3_STATE_SZ;
+        memcpy(after, sha->s, WH_MESSAGE_CRYPTO_SHA3_STATE_SZ);
+        after += WH_MESSAGE_CRYPTO_SHA3_STATE_SZ;
+    }
+    return after;
+}
+
+int wh_Client_Sha3UpdateRequest(whClientContext* ctx, wc_Sha3* sha,
+                                int hashType, const uint8_t* in, uint32_t inLen,
+                                bool* requestSent)
+{
+    int                          ret = 0;
+    whMessageCrypto_Sha3Request* req = NULL;
+    uint8_t*                     inlineData;
+    uint8_t*                     dataPtr = NULL;
+    uint32_t                     rate;
+    uint32_t                     inlineCap;
+    uint32_t                     wirePos = 0;
+    uint32_t                     i       = 0;
+    /* Snapshot of buffer state for rollback if SendRequest fails */
+    uint32_t savedI;
+    uint8_t  savedBuffer[WH_SHA3_MAX_RATE];
+
+    if (ctx == NULL || sha == NULL || requestSent == NULL ||
+        (in == NULL && inLen != 0)) {
+        return WH_ERROR_BADARGS;
+    }
+    *requestSent = false;
+
+    rate = wh_Crypto_Sha3Rate(hashType);
+    if (rate == 0 || rate > sizeof(savedBuffer)) {
+        return WH_ERROR_BADARGS;
+    }
+    if (sha->i >= rate) {
+        return WH_ERROR_BADARGS;
+    }
+    if (inLen > _Sha3UpdatePerCallCapacity(sha, hashType)) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* Empty update: nothing to send, no state to mutate. */
+    if (inLen == 0) {
+        return WH_ERROR_OK;
+    }
+
+    dataPtr = wh_CommClient_GetDataPtr(ctx->comm);
+    if (dataPtr == NULL) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* Save the buffer state before mutation so we can restore it if
+     * SendRequest fails, preventing silent SHA state corruption. */
+    savedI = sha->i;
+    memcpy(savedBuffer, sha->t, sha->i);
+
+    /* Setup generic header and get pointer to request data. The inline area
+     * starts after the state, which is only present once the sponge has been
+     * advanced. */
+    req = (whMessageCrypto_Sha3Request*)_createCryptoRequest(
+        dataPtr, hashType, ctx->cryptoAffinity);
+    inlineData = _Sha3FillRequest(req, sha, hashType, 0, 0);
+    inlineCap  = (req->stateSz == 0)
+                     ? ((WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_ONESHOT_SZ / rate) *
+                       rate)
+                     : WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_UPDATE_SZ(rate);
+
+    /* If there's a partial block already buffered, top it up from the input.
+     * If we manage to fill a full block, copy the completed block into the
+     * wire payload as the first inline block. */
+    if (sha->i > 0) {
+        while (i < inLen && sha->i < rate) {
+            sha->t[sha->i++] = in[i++];
+        }
+        if (sha->i == rate) {
+            memcpy(inlineData + wirePos, sha->t, rate);
+            wirePos += rate;
+            sha->i = 0;
+        }
+    }
+
+    /* Copy as many full blocks from the input as fit in the inline area. */
+    while ((inLen - i) >= rate && (wirePos + rate) <= inlineCap) {
+        memcpy(inlineData + wirePos, in + i, rate);
+        wirePos += rate;
+        i += rate;
+    }
+
+    /* Stash any remaining tail bytes into the buffer for next time. The
+     * capacity check above guarantees this fits without overflow. */
+    while (i < inLen) {
+        sha->t[sha->i++] = in[i++];
+    }
+
+    /* Pure-buffer-fill update: nothing to send. */
+    if (wirePos == 0) {
+        return WH_ERROR_OK;
+    }
+
+    req->inSz = wirePos;
+
+    ret = wh_Client_SendRequest(ctx, WH_MESSAGE_GROUP_CRYPTO, WC_ALGO_TYPE_HASH,
+                                sizeof(whMessageCrypto_GenericRequestHeader) +
+                                    sizeof(*req) + req->stateSz + wirePos,
+                                dataPtr);
+
+    if (ret == 0) {
+        *requestSent = true;
+    }
+    else {
+        /* SendRequest failed - restore buffer state so the caller can retry
+         * or continue hashing without data loss. */
+        sha->i = savedI;
+        memcpy(sha->t, savedBuffer, savedI);
+    }
+    return ret;
+}
+
+int wh_Client_Sha3UpdateResponse(whClientContext* ctx, wc_Sha3* sha,
+                                 int hashType)
+{
+    uint16_t                      group  = WH_MESSAGE_GROUP_CRYPTO;
+    uint16_t                      action = WH_MESSAGE_ACTION_NONE;
+    uint16_t                      dataSz = 0;
+    int                           ret    = 0;
+    whMessageCrypto_Sha3Response* res    = NULL;
+    uint8_t*                      dataPtr;
+
+    if (ctx == NULL || sha == NULL) {
+        return WH_ERROR_BADARGS;
+    }
+
+    dataPtr = wh_CommClient_GetDataPtr(ctx->comm);
+    if (dataPtr == NULL) {
+        return WH_ERROR_BADARGS;
+    }
+
+    ret = wh_Client_RecvResponse(ctx, &group, &action, &dataSz, dataPtr);
+    if (ret != WH_ERROR_OK) {
+        return ret;
+    }
+
+    ret = _getCryptoResponse(dataPtr, hashType, (uint8_t**)&res);
+    if (ret >= 0) {
+        if (dataSz < sizeof(whMessageCrypto_GenericResponseHeader) +
+                         sizeof(*res) + WH_MESSAGE_CRYPTO_SHA3_STATE_SZ) {
+            return WH_ERROR_ABORTED;
+        }
+        if (res->hashType != (uint32_t)hashType ||
+            res->stateSz != WH_MESSAGE_CRYPTO_SHA3_STATE_SZ) {
+            return WH_ERROR_ABORTED;
+        }
+        memcpy(sha->s, (uint8_t*)(res + 1),
+               WH_MESSAGE_CRYPTO_SHA3_STATE_SZ);
+    }
+    return ret;
+}
+
+int wh_Client_Sha3FinalRequest(whClientContext* ctx, wc_Sha3* sha, int hashType,
+                               uint32_t outSz)
+{
+    int                          ret;
+    whMessageCrypto_Sha3Request* req;
+    uint8_t*                     inlineData;
+    uint8_t*                     dataPtr;
+    uint32_t                     rate;
+
+    if (ctx == NULL || sha == NULL || outSz == 0) {
+        return WH_ERROR_BADARGS;
+    }
+
+    rate = wh_Crypto_Sha3Rate(hashType);
+    if (rate == 0 || sha->i >= rate) {
+        return WH_ERROR_BADARGS;
+    }
+    /* A SHAKE asked for more output than a response can carry is left to
+     * software; the client still holds the authoritative sponge. */
+    if (outSz > WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_OUTPUT_SZ) {
+        return WH_ERROR_NOSPACE;
+    }
+
+    dataPtr = wh_CommClient_GetDataPtr(ctx->comm);
+    if (dataPtr == NULL) {
+        return WH_ERROR_BADARGS;
+    }
+
+    req = (whMessageCrypto_Sha3Request*)_createCryptoRequest(
+        dataPtr, hashType, ctx->cryptoAffinity);
+    inlineData = _Sha3FillRequest(req, sha, hashType, 1, outSz);
+
+    req->inSz = sha->i;
+    if (sha->i > 0) {
+        memcpy(inlineData, sha->t, sha->i);
+    }
+
+    ret = wh_Client_SendRequest(ctx, WH_MESSAGE_GROUP_CRYPTO, WC_ALGO_TYPE_HASH,
+                                sizeof(whMessageCrypto_GenericRequestHeader) +
+                                    sizeof(*req) + req->stateSz + sha->i,
+                                dataPtr);
+    return ret;
+}
+
+int wh_Client_Sha3FinalResponse(whClientContext* ctx, wc_Sha3* sha,
+                                int hashType, uint8_t* out, uint32_t outSz)
+{
+    uint16_t                      group  = WH_MESSAGE_GROUP_CRYPTO;
+    uint16_t                      action = WH_MESSAGE_ACTION_NONE;
+    uint16_t                      dataSz = 0;
+    int                           ret;
+    whMessageCrypto_Sha3Response* res = NULL;
+    uint8_t*                      dataPtr;
+
+    if (ctx == NULL || sha == NULL || out == NULL || outSz == 0) {
+        return WH_ERROR_BADARGS;
+    }
+
+    dataPtr = wh_CommClient_GetDataPtr(ctx->comm);
+    if (dataPtr == NULL) {
+        return WH_ERROR_BADARGS;
+    }
+
+    ret = wh_Client_RecvResponse(ctx, &group, &action, &dataSz, dataPtr);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = _getCryptoResponse(dataPtr, hashType, (uint8_t**)&res);
+    if (ret >= 0) {
+        if (dataSz < sizeof(whMessageCrypto_GenericResponseHeader) +
+                         sizeof(*res) + outSz) {
+            return WH_ERROR_ABORTED;
+        }
+        if (res->hashType != (uint32_t)hashType || res->outSz != outSz) {
+            return WH_ERROR_ABORTED;
+        }
+        memcpy(out, (uint8_t*)(res + 1), outSz);
+        /* Reset state without blowing away devId */
+        (void)wc_InitSha3_256(sha, NULL, sha->devId);
+        sha->hashType = hashType;
+    }
+    return ret;
+}
+
+int wh_Client_Sha3(whClientContext* ctx, wc_Sha3* sha, int hashType,
+                   const uint8_t* in, uint32_t inLen, uint8_t* out,
+                   uint32_t outSz)
+{
+    int ret = WH_ERROR_OK;
+
+    if (ctx == NULL || sha == NULL) {
+        return WH_ERROR_BADARGS;
+    }
+    if (wh_Crypto_Sha3Rate(hashType) == 0) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* A fixed-length variant reports no output length, so supply its digest
+     * size; a SHAKE must say how much it wants. */
+    if ((out != NULL) && (outSz == 0)) {
+        outSz = wh_Crypto_Sha3DigestSz(hashType);
+        if (outSz == 0) {
+            return WH_ERROR_BADARGS;
+        }
+    }
+
+    /* Caller invoked SHA3 update */
+    if (in != NULL && inLen > 0) {
+        uint32_t consumed = 0;
+        while (ret == WH_ERROR_OK && consumed < inLen) {
+            uint32_t capacity  = _Sha3UpdatePerCallCapacity(sha, hashType);
+            uint32_t remaining = inLen - consumed;
+            uint32_t chunk     = (remaining < capacity) ? remaining : capacity;
+            bool     sent      = false;
+
+            ret = wh_Client_Sha3UpdateRequest(ctx, sha, hashType, in + consumed,
+                                              chunk, &sent);
+            if (ret != WH_ERROR_OK) {
+                break;
+            }
+            if (sent) {
+                do {
+                    ret = wh_Client_Sha3UpdateResponse(ctx, sha, hashType);
+                } while (ret == WH_ERROR_NOTREADY);
+                if (ret != WH_ERROR_OK) {
+                    break;
+                }
+            }
+            consumed += chunk;
+        }
+    }
+
+    /* Caller invoked SHA3 finalize */
+    if (ret == WH_ERROR_OK && out != NULL) {
+        ret = wh_Client_Sha3FinalRequest(ctx, sha, hashType, outSz);
+        if (ret == WH_ERROR_OK) {
+            do {
+                ret = wh_Client_Sha3FinalResponse(ctx, sha, hashType, out,
+                                                  outSz);
+            } while (ret == WH_ERROR_NOTREADY);
+        }
+    }
+
+    return ret;
+}
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
+
 #ifdef WOLFHSM_CFG_DMA
 int wh_Client_Sha512DmaUpdateRequest(whClientContext* ctx, wc_Sha512* sha,
                                      const uint8_t* in, uint32_t inLen,

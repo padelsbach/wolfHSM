@@ -979,4 +979,51 @@ int wh_Crypto_CmacAesRestoreStateFromMsg(
 }
 #endif /* WOLFSSL_CMAC */
 
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+uint32_t wh_Crypto_Sha3Rate(int hashType)
+{
+    switch (hashType) {
+#ifdef WOLFSSL_SHA3
+        case WC_HASH_TYPE_SHA3_224:
+            return WC_SHA3_224_BLOCK_SIZE;
+        case WC_HASH_TYPE_SHA3_256:
+            return WC_SHA3_256_BLOCK_SIZE;
+        case WC_HASH_TYPE_SHA3_384:
+            return WC_SHA3_384_BLOCK_SIZE;
+        case WC_HASH_TYPE_SHA3_512:
+            return WC_SHA3_512_BLOCK_SIZE;
+#endif
+#ifdef WOLFSSL_SHAKE128
+        case WC_HASH_TYPE_SHAKE128:
+            return WC_SHA3_128_COUNT * 8u;
+#endif
+#ifdef WOLFSSL_SHAKE256
+        case WC_HASH_TYPE_SHAKE256:
+            return WC_SHA3_256_COUNT * 8u;
+#endif
+        default:
+            return 0;
+    }
+}
+
+uint32_t wh_Crypto_Sha3DigestSz(int hashType)
+{
+    switch (hashType) {
+#ifdef WOLFSSL_SHA3
+        case WC_HASH_TYPE_SHA3_224:
+            return WC_SHA3_224_DIGEST_SIZE;
+        case WC_HASH_TYPE_SHA3_256:
+            return WC_SHA3_256_DIGEST_SIZE;
+        case WC_HASH_TYPE_SHA3_384:
+            return WC_SHA3_384_DIGEST_SIZE;
+        case WC_HASH_TYPE_SHA3_512:
+            return WC_SHA3_512_DIGEST_SIZE;
+#endif
+        default:
+            return 0;
+    }
+}
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
+
 #endif  /* !WOLFHSM_CFG_NO_CRYPTO */

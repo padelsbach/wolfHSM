@@ -875,6 +875,122 @@ int wh_MessageCrypto_TranslateSha2Response(
     uint16_t magic, const whMessageCrypto_Sha2Response* src,
     whMessageCrypto_Sha2Response* dest);
 
+
+/* Size of a Keccak state, shared by every variant below. */
+#define WH_MESSAGE_CRYPTO_SHA3_STATE_SZ 200u /* sizeof(word64) * 25 */
+
+/* SHA3 Request (Keccak state and input data follow the struct).
+ *
+ * One wire format covers SHA3-224/256/384/512 and SHAKE128/256: every variant
+ * keeps the same 1600-bit Keccak sponge, and the rate and padding follow from
+ * hashType.
+ *
+ * Wire layout in the comm buffer:
+ *   whMessageCrypto_GenericRequestHeader
+ *   whMessageCrypto_Sha3Request
+ *   uint8_t state[stateSz]   (omitted when stateSz is 0)
+ *   uint8_t in[inSz]
+ *
+ * Unlike the SHA-2 requests above, the state trails the struct rather than
+ * sitting inside it, so a hash that starts from scratch does not carry one.
+ * A zeroed sponge is a known constant, and at 200 bytes it would be 16% of a
+ * default comm buffer - the equivalent waste on SHA-2 is a 40-byte IV, small
+ * enough there that the fixed field costs nothing worth reclaiming.
+ *
+ * Non-final updates: inSz must be a multiple of the rate for hashType.
+ * Final: any length. The client buffers any partial-block tail locally and
+ * sends it with isLastBlock=1. Feeding whole rate multiples leaves nothing
+ * buffered in the sponge, which is why no partial-block buffer travels beside
+ * the state.
+ */
+typedef struct {
+    uint32_t hashType;
+    /* 1 = last block; server finalizes after consuming inSz bytes.
+     * 0 = non-final update; inSz MUST be a multiple of the rate. */
+    uint32_t isLastBlock;
+    /* Bytes of Keccak state trailing this struct: 0 to start from a zeroed
+     * sponge, WH_MESSAGE_CRYPTO_SHA3_STATE_SZ to resume one. Carried in host
+     * byte order, as the SHA-2 resume state above carries its hash value: a
+     * client and server of differing endianness would need this translated. */
+    uint32_t stateSz;
+    /* Number of input bytes, following the state. */
+    uint32_t inSz;
+    /* Bytes of output wanted. Fixed by hashType for SHA3-224/256/384/512,
+     * chosen by the caller for SHAKE. Ignored when isLastBlock is 0. */
+    uint32_t outSz;
+} whMessageCrypto_Sha3Request;
+
+/* Maximum input carried inline by a hash that starts from scratch: no state
+ * travels, and no rate alignment applies because a finalize consumes whatever
+ * it is given. */
+#define WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_ONESHOT_SZ          \
+    (WOLFHSM_CFG_COMM_DATA_LEN -                              \
+     (uint32_t)sizeof(whMessageCrypto_GenericRequestHeader) - \
+     (uint32_t)sizeof(whMessageCrypto_Sha3Request))
+
+/* Maximum input carried inline by an update that resumes a sponge, rounded
+ * down to a multiple of the rate so nothing is left buffered server-side.
+ * Parameterized because, unlike SHA-2, the rate differs between the variants
+ * sharing this wire format. */
+#define WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_UPDATE_SZ(_rate)      \
+    (((WOLFHSM_CFG_COMM_DATA_LEN -                              \
+       (uint32_t)sizeof(whMessageCrypto_GenericRequestHeader) - \
+       (uint32_t)sizeof(whMessageCrypto_Sha3Request) -          \
+       WH_MESSAGE_CRYPTO_SHA3_STATE_SZ) /                       \
+      (uint32_t)(_rate)) *                                      \
+     (uint32_t)(_rate))
+
+/* SHAKE128 has the largest rate of the variants sharing this format, so it is
+ * the binding case for the comm buffer. */
+WH_UTILS_STATIC_ASSERT(WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_UPDATE_SZ(168u) >=
+                           168u,
+                       "Comm buffer too small to fit a SHAKE128 block");
+
+/* SHA3 Response (Keccak state or output data follows the struct).
+ *
+ * Wire layout in the comm buffer:
+ *   whMessageCrypto_GenericResponseHeader
+ *   whMessageCrypto_Sha3Response
+ *   uint8_t state[stateSz]   (non-final update only)
+ *   uint8_t out[outSz]       (finalize only)
+ *
+ * Never both: an update returns the sponge to resume from and no output, while
+ * a finalize returns output and leaves the sponge spent. Sized to match the
+ * request so the fixed parts line up; the server absorbs all input before
+ * producing output, so the trailing regions may overlap safely.
+ */
+typedef struct {
+    uint32_t hashType;
+    /* Bytes of Keccak state trailing this struct; 0 on a finalize. */
+    uint32_t stateSz;
+    /* Bytes of output trailing this struct; 0 on a non-final update. */
+    uint32_t outSz;
+    uint8_t  WH_PAD[8];
+} whMessageCrypto_Sha3Response;
+
+WH_UTILS_STATIC_ASSERT(sizeof(whMessageCrypto_Sha3Response) ==
+                           sizeof(whMessageCrypto_Sha3Request),
+                       "Sha3Request and Sha3Response must be the same size");
+
+/* Maximum output carried inline on a finalize. Digests always fit; a SHAKE
+ * asked for more than this is declined so software can produce it. */
+#define WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_OUTPUT_SZ            \
+    (WOLFHSM_CFG_COMM_DATA_LEN -                               \
+     (uint32_t)sizeof(whMessageCrypto_GenericResponseHeader) - \
+     (uint32_t)sizeof(whMessageCrypto_Sha3Response))
+
+/* SHA3-512 has the largest fixed digest of the variants sharing this format. */
+WH_UTILS_STATIC_ASSERT(WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_OUTPUT_SZ >= 64u,
+                       "Comm buffer too small to return a SHA3-512 digest");
+
+int wh_MessageCrypto_TranslateSha3Request(
+    uint16_t magic, const whMessageCrypto_Sha3Request* src,
+    whMessageCrypto_Sha3Request* dest);
+
+int wh_MessageCrypto_TranslateSha3Response(
+    uint16_t magic, const whMessageCrypto_Sha3Response* src,
+    whMessageCrypto_Sha3Response* dest);
+
 /*
  * CMAC (AES)
  */

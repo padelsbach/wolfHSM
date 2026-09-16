@@ -4521,6 +4521,223 @@ static int _HandleSha512(whServerContext* ctx, uint16_t magic, int devId,
     return ret;
 }
 #endif /* WOLFSSL_SHA512 */
+
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+static int _Sha3Init(wc_Sha3* sha3, uint32_t hashType, int devId)
+{
+    switch (hashType) {
+#ifdef WOLFSSL_SHA3
+        case WC_HASH_TYPE_SHA3_224:
+            return wc_InitSha3_224(sha3, NULL, devId);
+        case WC_HASH_TYPE_SHA3_256:
+            return wc_InitSha3_256(sha3, NULL, devId);
+        case WC_HASH_TYPE_SHA3_384:
+            return wc_InitSha3_384(sha3, NULL, devId);
+        case WC_HASH_TYPE_SHA3_512:
+            return wc_InitSha3_512(sha3, NULL, devId);
+#endif
+#ifdef WOLFSSL_SHAKE128
+        case WC_HASH_TYPE_SHAKE128:
+            return wc_InitShake128(sha3, NULL, devId);
+#endif
+#ifdef WOLFSSL_SHAKE256
+        case WC_HASH_TYPE_SHAKE256:
+            return wc_InitShake256(sha3, NULL, devId);
+#endif
+        default:
+            return WH_ERROR_BADARGS;
+    }
+}
+
+static int _Sha3Update(wc_Sha3* sha3, uint32_t hashType, const uint8_t* in,
+                       uint32_t inSz)
+{
+    switch (hashType) {
+#ifdef WOLFSSL_SHA3
+        case WC_HASH_TYPE_SHA3_224:
+            return wc_Sha3_224_Update(sha3, in, inSz);
+        case WC_HASH_TYPE_SHA3_256:
+            return wc_Sha3_256_Update(sha3, in, inSz);
+        case WC_HASH_TYPE_SHA3_384:
+            return wc_Sha3_384_Update(sha3, in, inSz);
+        case WC_HASH_TYPE_SHA3_512:
+            return wc_Sha3_512_Update(sha3, in, inSz);
+#endif
+#ifdef WOLFSSL_SHAKE128
+        case WC_HASH_TYPE_SHAKE128:
+            return wc_Shake128_Update(sha3, in, inSz);
+#endif
+#ifdef WOLFSSL_SHAKE256
+        case WC_HASH_TYPE_SHAKE256:
+            return wc_Shake256_Update(sha3, in, inSz);
+#endif
+        default:
+            return WH_ERROR_BADARGS;
+    }
+}
+
+static int _Sha3Final(wc_Sha3* sha3, uint32_t hashType, uint8_t* out,
+                      uint32_t outSz)
+{
+    /* Only a SHAKE consumes a length; the fixed-digest variants do not */
+    (void)outSz;
+
+    switch (hashType) {
+#ifdef WOLFSSL_SHA3
+        case WC_HASH_TYPE_SHA3_224:
+            return wc_Sha3_224_Final(sha3, out);
+        case WC_HASH_TYPE_SHA3_256:
+            return wc_Sha3_256_Final(sha3, out);
+        case WC_HASH_TYPE_SHA3_384:
+            return wc_Sha3_384_Final(sha3, out);
+        case WC_HASH_TYPE_SHA3_512:
+            return wc_Sha3_512_Final(sha3, out);
+#endif
+#ifdef WOLFSSL_SHAKE128
+        case WC_HASH_TYPE_SHAKE128:
+            return wc_Shake128_Final(sha3, out, outSz);
+#endif
+#ifdef WOLFSSL_SHAKE256
+        case WC_HASH_TYPE_SHAKE256:
+            return wc_Shake256_Final(sha3, out, outSz);
+#endif
+        default:
+            return WH_ERROR_BADARGS;
+    }
+}
+
+static int _HandleSha3(whServerContext* ctx, uint16_t magic, int devId,
+                       const void* cryptoDataIn, uint16_t inSize,
+                       void* cryptoDataOut, uint16_t* outSize)
+{
+    int                          ret = 0;
+    wc_Sha3                      sha3[1];
+    whMessageCrypto_Sha3Request  req;
+    whMessageCrypto_Sha3Response res = {0};
+    const uint8_t*               inData;
+    uint8_t*                     outData;
+    uint32_t                     rate;
+    uint32_t                     digestSz;
+    uint32_t                     avail;
+
+    (void)ctx;
+
+    /* Validate minimum size */
+    if (inSize < sizeof(whMessageCrypto_Sha3Request)) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* Translate the request */
+    ret = wh_MessageCrypto_TranslateSha3Request(magic, cryptoDataIn, &req);
+    if (ret != 0) {
+        return ret;
+    }
+
+    rate = wh_Crypto_Sha3Rate((int)req.hashType);
+    if (rate == 0) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* The state is either absent, meaning start from a zeroed sponge, or a
+     * whole one. Nothing in between is meaningful. */
+    if ((req.stateSz != 0) &&
+        (req.stateSz != WH_MESSAGE_CRYPTO_SHA3_STATE_SZ)) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* Validate the state and input both fit inside the received payload */
+    avail = (uint32_t)(inSize - sizeof(whMessageCrypto_Sha3Request));
+    if (req.stateSz > avail) {
+        return WH_ERROR_BADARGS;
+    }
+    if (req.inSz > (avail - req.stateSz)) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* Non-final updates must be multiples of the rate */
+    if (!req.isLastBlock && ((req.inSz % rate) != 0)) {
+        return WH_ERROR_BADARGS;
+    }
+    /* Final block must be strictly less than one block (client always buffers
+     * full blocks and sends only the partial tail on finalize). */
+    if (req.isLastBlock && (req.inSz >= rate)) {
+        return WH_ERROR_BADARGS;
+    }
+
+    /* A fixed-length variant produces exactly its digest; a SHAKE produces
+     * what was asked for, bounded by what the response can carry. */
+    digestSz = wh_Crypto_Sha3DigestSz((int)req.hashType);
+    if (req.isLastBlock) {
+        if ((req.outSz == 0) ||
+            (req.outSz > WH_MESSAGE_CRYPTO_SHA3_MAX_INLINE_OUTPUT_SZ)) {
+            return WH_ERROR_BADARGS;
+        }
+        if ((digestSz != 0) && (req.outSz != digestSz)) {
+            return WH_ERROR_BADARGS;
+        }
+    }
+
+    inData = (const uint8_t*)cryptoDataIn +
+             sizeof(whMessageCrypto_Sha3Request) + req.stateSz;
+    outData = (uint8_t*)cryptoDataOut + sizeof(whMessageCrypto_Sha3Response);
+
+    ret = _Sha3Init(sha3, req.hashType, devId);
+    if (ret != 0) {
+        return ret;
+    }
+
+    /* Restore intermediate state from client; server is stateless otherwise.
+     * An absent state leaves the sponge as wc_InitSha3 zeroed it. The partial
+     * block buffer lives only on the client, so nothing is buffered here. */
+    if (req.stateSz != 0) {
+        memcpy(sha3->s, (const uint8_t*)cryptoDataIn +
+                            sizeof(whMessageCrypto_Sha3Request),
+               WH_MESSAGE_CRYPTO_SHA3_STATE_SZ);
+    }
+    sha3->i = 0;
+
+    if (req.inSz > 0) {
+        ret = _Sha3Update(sha3, req.hashType, inData, req.inSz);
+    }
+    if (ret == 0) {
+        if (req.isLastBlock) {
+            /* wolfCrypt is responsible for last block padding */
+            ret = _Sha3Final(sha3, req.hashType, outData, req.outSz);
+            if (ret == 0) {
+                res.stateSz = 0;
+                res.outSz   = req.outSz;
+            }
+        }
+        else {
+            /* Post-condition: non-final updates MUST leave nothing buffered,
+             * since we validated inSz is a multiple of the rate. */
+            if (sha3->i != 0) {
+                ret = WH_ERROR_ABORTED;
+            }
+            else {
+                memcpy(outData, sha3->s, WH_MESSAGE_CRYPTO_SHA3_STATE_SZ);
+                res.stateSz = WH_MESSAGE_CRYPTO_SHA3_STATE_SZ;
+                res.outSz   = 0;
+            }
+        }
+    }
+
+    wc_Sha3_256_Free(sha3);
+
+    /* Translate the response */
+    if (ret == 0) {
+        res.hashType = req.hashType;
+        ret = wh_MessageCrypto_TranslateSha3Response(magic, &res,
+                                                     cryptoDataOut);
+        if (ret == 0) {
+            *outSize = (uint16_t)(sizeof(res) + res.stateSz + res.outSz);
+        }
+    }
+
+    return ret;
+}
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
 #ifdef WOLFSSL_HAVE_MLDSA
 
 #ifndef WOLFSSL_MLDSA_NO_MAKE_KEY
@@ -5595,6 +5812,30 @@ int wh_Server_HandleCryptoRequest(whServerContext* ctx, uint16_t magic,
                     }
                     break;
 #endif /* WOLFSSL_SHA512 */
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+#ifdef WOLFSSL_SHA3
+                case WC_HASH_TYPE_SHA3_224:
+                case WC_HASH_TYPE_SHA3_256:
+                case WC_HASH_TYPE_SHA3_384:
+                case WC_HASH_TYPE_SHA3_512:
+#endif
+#ifdef WOLFSSL_SHAKE128
+                case WC_HASH_TYPE_SHAKE128:
+#endif
+#ifdef WOLFSSL_SHAKE256
+                case WC_HASH_TYPE_SHAKE256:
+#endif
+                    WH_DEBUG_SERVER("SHA3 req recv. type:%u\n",
+                           rqstHeader.algoType);
+                    ret = _HandleSha3(ctx, magic, devId, cryptoDataIn,
+                                      cryptoInSize, cryptoDataOut,
+                                      &cryptoOutSize);
+                    if (ret != 0) {
+                        WH_DEBUG_SERVER("SHA3 ret = %d\n", ret);
+                    }
+                    break;
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
                 default:
                     ret = NOT_COMPILED_IN;
                     break;

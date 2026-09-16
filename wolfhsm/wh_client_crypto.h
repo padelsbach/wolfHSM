@@ -2609,6 +2609,88 @@ int wh_Client_Sha512FinalRequest(whClientContext* ctx, wc_Sha512* sha);
 int wh_Client_Sha512FinalResponse(whClientContext* ctx, wc_Sha512* sha,
                                   uint8_t* out);
 
+#if defined(WOLFSSL_SHA3) || defined(WOLFSSL_SHAKE128) || \
+    defined(WOLFSSL_SHAKE256)
+/**
+ * @brief Performs a Keccak hash operation on the input data.
+ *
+ * One entry point for SHA3-224/256/384/512 and SHAKE128/256, selected by
+ * hashType. Updates when in/inLen are supplied, finalizes when out is, in the
+ * same shape as wh_Client_Sha256(). outSz is the digest size for a SHA3
+ * variant and the caller's chosen length for a SHAKE.
+ *
+ * @param[in] ctx Pointer to the client context.
+ * @param[in] sha Pointer to the Keccak context.
+ * @param[in] hashType WC_HASH_TYPE_SHA3_* or WC_HASH_TYPE_SHAKE*.
+ * @param[in] in Pointer to the input data, or NULL when finalizing.
+ * @param[in] inLen Length of the input data.
+ * @param[out] out Pointer to the output buffer, or NULL when updating.
+ * @param[in] outSz Bytes of output wanted.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+int wh_Client_Sha3(whClientContext* ctx, wc_Sha3* sha, int hashType,
+                   const uint8_t* in, uint32_t inLen, uint8_t* out,
+                   uint32_t outSz);
+
+/**
+ * @brief Sends a Keccak update request, buffering any partial-block tail.
+ *
+ * If *requestSent is true, the caller MUST call wh_Client_Sha3UpdateResponse
+ * before issuing another request. A pure buffer fill sends nothing and leaves
+ * *requestSent false.
+ *
+ * @param[in] ctx Pointer to the client context.
+ * @param[in] sha Pointer to the Keccak context.
+ * @param[in] hashType WC_HASH_TYPE_SHA3_* or WC_HASH_TYPE_SHAKE*.
+ * @param[in] in Pointer to the input data.
+ * @param[in] inLen Length of the input data.
+ * @param[out] requestSent Set true when a request went out.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+int wh_Client_Sha3UpdateRequest(whClientContext* ctx, wc_Sha3* sha,
+                                int hashType, const uint8_t* in, uint32_t inLen,
+                                bool* requestSent);
+
+/**
+ * @brief Receives a Keccak update response and stores the returned sponge.
+ *
+ * @param[in] ctx Pointer to the client context.
+ * @param[in,out] sha Pointer to the Keccak context.
+ * @param[in] hashType WC_HASH_TYPE_SHA3_* or WC_HASH_TYPE_SHAKE*.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+int wh_Client_Sha3UpdateResponse(whClientContext* ctx, wc_Sha3* sha,
+                                 int hashType);
+
+/**
+ * @brief Sends a Keccak finalize request carrying any buffered tail.
+ *
+ * Returns WH_ERROR_NOSPACE when outSz exceeds what a response can carry, so
+ * the caller can finish in software from the sponge it still holds.
+ *
+ * @param[in] ctx Pointer to the client context.
+ * @param[in] sha Pointer to the Keccak context.
+ * @param[in] hashType WC_HASH_TYPE_SHA3_* or WC_HASH_TYPE_SHAKE*.
+ * @param[in] outSz Bytes of output wanted.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+int wh_Client_Sha3FinalRequest(whClientContext* ctx, wc_Sha3* sha, int hashType,
+                               uint32_t outSz);
+
+/**
+ * @brief Receives a Keccak finalize response and resets the context.
+ *
+ * @param[in] ctx Pointer to the client context.
+ * @param[in,out] sha Pointer to the Keccak context.
+ * @param[in] hashType WC_HASH_TYPE_SHA3_* or WC_HASH_TYPE_SHAKE*.
+ * @param[out] out Pointer to the output buffer.
+ * @param[in] outSz Bytes of output expected.
+ * @return int Returns 0 on success, or a negative error code on failure.
+ */
+int wh_Client_Sha3FinalResponse(whClientContext* ctx, wc_Sha3* sha,
+                                int hashType, uint8_t* out, uint32_t outSz);
+#endif /* WOLFSSL_SHA3 || WOLFSSL_SHAKE128 || WOLFSSL_SHAKE256 */
+
 /**
  * @brief Performs a SHA-512 hash operation on the input data using DMA.
  *

@@ -12,7 +12,7 @@ inputs:
       commit SHA (actions/checkout does not resolve abbreviated SHAs).
     required: false
     # wolfSSL tag or commit SHA to checkout:
-    default: '339aa5779f7f5fc3a94109558161926dd2eb4748'
+    default: 'c8db2e18168e89cee9c27476ffd2e936f161e1b6'
 
 runs:
   using: 'composite'

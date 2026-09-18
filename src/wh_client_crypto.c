@@ -9243,6 +9243,7 @@ static int _Sha3UpdateRequest(whClientContext* ctx, wc_Sha3* sha,
 
     /* Pure buffer-fill update: nothing to send. */
     if (wirePos == 0) {
+        wc_ForceZero(savedT, sizeof(savedT));
         return WH_ERROR_OK;
     }
 
@@ -9262,6 +9263,7 @@ static int _Sha3UpdateRequest(whClientContext* ctx, wc_Sha3* sha,
         sha->i = savedI;
         memcpy(sha->t, savedT, savedI);
     }
+    wc_ForceZero(savedT, sizeof(savedT));
     return ret;
 }
 
@@ -9469,6 +9471,8 @@ static int _Sha3Oneshot(whClientContext* ctx, wc_Sha3* sha,
         _Sha3RestoreState(sha, &saved);
     }
 
+    /* The snapshot holds sponge state and message bytes. */
+    wc_ForceZero(&saved, sizeof(saved));
     return ret;
 }
 
@@ -9674,6 +9678,7 @@ static int _Sha3DmaUpdateRequest(whClientContext* ctx, wc_Sha3* sha,
     }
 
     if (wirePos == 0 && dmaSz == 0) {
+        wc_ForceZero(savedT, sizeof(savedT));
         return WH_ERROR_OK;
     }
 
@@ -9718,6 +9723,7 @@ static int _Sha3DmaUpdateRequest(whClientContext* ctx, wc_Sha3* sha,
         }
         memset(&ctx->dma.asyncCtx.sha, 0, sizeof(ctx->dma.asyncCtx.sha));
     }
+    wc_ForceZero(savedT, sizeof(savedT));
     return ret;
 }
 
@@ -9897,6 +9903,8 @@ static int _Sha3DmaOneshot(whClientContext* ctx, wc_Sha3* sha,
         _Sha3RestoreState(sha, &saved);
     }
 
+    /* The snapshot holds sponge state and message bytes. */
+    wc_ForceZero(&saved, sizeof(saved));
     return ret;
 }
 
